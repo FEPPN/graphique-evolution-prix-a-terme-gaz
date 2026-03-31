@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Évolution des prix à terme du gaz</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body{
+      margin:0;
+      background:#fff;
+      font-family: 'Avenir', 'Avenir Next', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      display:flex;
+      justify-content:center;
+      padding:40px 16px 60px;
+    }
+    .chart-wrapper{
+      background:transparent;
+      border-radius:0;
+      box-shadow:none;
+      padding:0;
+      width:100%;
+      max-width:1000px;
+    }
+    h1{
+      margin:0 0 14px;
+      text-align:center;
+      font-size:22px;
+      font-weight:600;
+      color:#0b0f19;
+    }
+    .legend-note{
+      margin:2px 0 20px;
+      text-align:center;
+      color:#64748b;
+      font-size:13px;
+    }
+    canvas{
+      width:100%!important;
+      height:auto!important;
+      display:block;
+      background:transparent!important;
+    }
+    @media (max-width: 640px){
+      body{ padding:24px 12px 40px; }
+      .chart-wrapper{ max-width:100%; }
+      h1{ font-size:18px; line-height:1.3; padding:0 4px; }
+      .legend-note{ font-size:12px; margin-bottom:16px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="chart-wrapper">
+    <h1>Évolution des prix à terme du gaz par trimestre</h1>
+    <div class="legend-note">Depuis février 2026 (Produits sélectionnés)</div>
+    <canvas id="chart"></canvas>
+  </div>
+
+  <script>
+    // --- DONNÉES COMPLÈTES JUSQU'AU 27/03 ---
+    const rawCSV = `cotation_date,2026 Q2,2026 août,2026 Q4,2027 Q1,2027 Q4,2028 Q1,Notes,Notes évo Court terme,Notes évo Hiver 2026/27,Notes évo Hiver 2027/28
+2026-02-02,"29,388","28,877","28,784","28,837","24,949","25,125",,,,
+2026-02-03,"28,887","28,422","28,316","28,605","24,319","25,072",,,,
+2026-02-05,"29,483","28,917","28,91","29,02","24,577","25,113",,,,
+2026-02-09,"29,829","29,446","29,647","29,586","24,451","25,439",,,,
+2026-02-10,"28,748","28,424","28,775","28,565","24,552","24,906",,,,
+2026-02-12,"29,467","29,131","29,335","29,25","24,706","24,841",,,,
+2026-02-26,"30,593","30,23","30,379","30,262","24,991","25,725",,,,
+2026-02-27,"30,615","30,239","30,464","29,987","25,518","25,431",Début conflit,,,
+2026-03-02,"42,229","38,763","36,18","34,051","25,753","25,945",,,,
+2026-03-03,"52,546","47,802","44,676","38,85","26,199","25,885",Blocage du détroit d'Ormuz,,,
+2026-03-04,"46,326","41,536","38,844","35,483","26,986","25,667",,,,
+2026-03-05,"48,246","43,651","40,85","37,864","27,531","27,267",,,,
+2026-03-06,"51,731","48,893","46,383","43,987","27,991","28,125",,,,
+2026-03-09,"50,210","48,150","46,250","43,650","29,600","29,100",,,,
+2026-03-10,"49,520","47,810","46,200","43,500","30,450","29,650",,,,
+2026-03-11,"48,845","47,476","46,172","43,339","31,306","30,143",,,,
+2026-03-12,"49,090","48,100","46,550","44,070","31,820","30,830",,,,
+2026-03-13,"49,347","48,73","46,925","44,808","32,337","31,517",,,,
+2026-03-16,"50,253","49,474","47,9","45,645","32,904","32,225",,,,
+2026-03-17,"50,753","50,378","48,15","45,82","33,1","32,5",,,,
+2026-03-18,"52,140","51,520","49,050","46,530","33,520","32,910",,,,
+2026-03-19,"54,250","53,810","50,560","47,840","34,250","33,620",Frappes iraniennes sur l'usine GNL de Ras Laffan (Qatar),,,
+2026-03-20,"53,510","52,940","49,820","47,210","33,810","33,150",,,,
+2026-03-23,"52,820","52,150","49,140","46,520","33,420","32,730",,,,
+2026-03-24,"51,530","50,820","48,250","45,810","32,940","32,250",,,,
+2026-03-25,"50,910","50,240","47,760","45,320","32,510","31,840",,,,
+2026-03-26,"51,840","51,150","48,510","46,050","33,020","32,310",,,,
+2026-03-27,"51,250","50,560","48,040","45,530","32,750","32,040",,,,`;
+
+    // Formateur de date
+    const fmtDate = dateStr => {
+      if (dateStr.includes('-')) {
+        const d = new Date(dateStr);
+        if (!isNaN(d.getTime())) return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+      }
+      return dateStr;
+    };
+
+    // Palette de 6 couleurs bien distinctes pour les 6 produits
+    const palette = [
+      "#4f46e5", // Indigo (2026 Q2)
+      "#0ea5e9", // Bleu ciel (2026 août)
+      "#10b981", // Émeraude (2026 Q4)
+      "#f59e0b", // Ambre (2027 Q1)
+      "#ef4444", // Rouge (2027 Q4)
+      "#8b5cf6"  // Violet (2028 Q1)
+    ];
+
+    // Fonction pour parser dynamiquement le CSV
+    const parseCSV = (csvText) => {
+      const rows = csvText.trim().split(/\r?\n/);
+      const headers = rows[0].split(',').map(h => h.trim());
+      
+      const productCols = [];
+      let notesColIndex = -1;
+
+      // On récupère toutes les colonnes sauf la date et celles contenant "Notes"
+      headers.forEach((h, i) => {
+        if (i > 0) {
+          if (h === 'Notes') {
+            notesColIndex = i; // On repère la colonne "Notes"
+          } else if (!h.toLowerCase().includes('note')) {
+            productCols.push({ index: i, name: h });
+          }
+        }
+      });
+
+      const labels = [];
+      const annotationsData = [];
+      const datasets = productCols.map((col, idx) => ({
+        label: col.name,
+        data: [],
+        borderColor: palette[idx % palette.length],
+        backgroundColor: palette[idx % palette.length],
+        borderWidth: 2,
+        pointRadius: 1, // Points discrets
+        pointHoverRadius: 5,
+        tension: 0.2,
+        fill: false, 
+        spanGaps: true
+      }));
+
+      for(let i = 1; i < rows.length; i++) {
+        if(!rows[i].trim()) continue;
+        
+        let cols = [];
+        let inQuotes = false;
+        let current = '';
+        
+        for(let char of rows[i]) {
+            if(char === '"') inQuotes = !inQuotes;
+            else if(char === ',' && !inQuotes) { cols.push(current); current = ''; }
+            else current += char;
+        }
+        cols.push(current);
+
+        const dateStr = cols[0];
+        if (!dateStr) continue;
+        const formattedDate = fmtDate(dateStr);
+        labels.push(formattedDate);
+
+        // Extraction des notes (si présentes sur cette ligne)
+        if (notesColIndex !== -1 && cols[notesColIndex] && cols[notesColIndex].trim() !== '') {
+          annotationsData.push({
+            index: labels.length - 1, // On stocke l'index de la date correspondante
+            text: cols[notesColIndex].trim()
+          });
+        }
+
+        // Remplissage des données
+        productCols.forEach((colDef, idx) => {
+            let valStr = cols[colDef.index] || '';
+            valStr = valStr.replace(',', '.').trim();
+            const val = parseFloat(valStr);
+            datasets[idx].data.push(isNaN(val) ? null : val);
+        });
+      }
+
+      return { labels, datasets, annotationsData };
+    };
+
+    // Plugin personnalisé pour dessiner les annotations (lignes verticales + texte)
+    const customAnnotationsPlugin = {
+      id: 'customAnnotations',
+      afterDraw: (chart) => {
+        const annotations = chart.config.data.annotationsData;
+        if (!annotations || annotations.length === 0) return;
+
+        const { ctx, scales: { x, y } } = chart;
+        
+        annotations.forEach((ann, i) => {
+          const xPos = x.getPixelForTick(ann.index);
+          if (isNaN(xPos) || xPos === undefined) return;
+
+          ctx.save();
+          
+          // Dessin de la ligne verticale en pointillés
+          ctx.beginPath();
+          ctx.moveTo(xPos, y.top);
+          ctx.lineTo(xPos, y.bottom);
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = '#94a3b8'; // Gris discret et élégant
+          ctx.setLineDash([4, 4]);
+          ctx.stroke();
+
+          // Paramètres de la boîte de texte
+          ctx.font = '600 11px Avenir, system-ui, sans-serif';
+          
+          // Gestion du texte sur plusieurs lignes pour les notes longues
+          const maxWidth = 140;
+          const words = ann.text.split(' ');
+          const lines = [];
+          let currentLine = words[0];
+
+          for (let j = 1; j < words.length; j++) {
+            const word = words[j];
+            const width = ctx.measureText(currentLine + " " + word).width;
+            if (width < maxWidth) {
+              currentLine += " " + word;
+            } else {
+              lines.push(currentLine);
+              currentLine = word;
+            }
+          }
+          lines.push(currentLine);
+
+          let maxLineWidth = 0;
+          lines.forEach(l => {
+            const w = ctx.measureText(l).width;
+            if (w > maxLineWidth) maxLineWidth = w;
+          });
+
+          const paddingX = 8;
+          const paddingY = 6;
+          const lineHeight = 14;
+          const boxWidth = maxLineWidth + paddingX * 2;
+          const boxHeight = (lines.length * lineHeight) + paddingY * 2 - 2; 
+          
+          // Alterne la hauteur (10px puis 70px) pour éviter les superpositions si les événements sont proches
+          const yAdjust = (i % 2 === 0) ? 10 : 70; 
+          const yPos = y.top + yAdjust;
+          
+          // Garde la boîte dans les limites du graphique pour ne pas la couper
+          let xBox = xPos - boxWidth / 2;
+          if (xBox < x.left) xBox = x.left;
+          if (xBox + boxWidth > x.right) xBox = x.right - boxWidth;
+
+          // Dessin du fond de la note
+          ctx.beginPath();
+          if (ctx.roundRect) {
+            ctx.roundRect(xBox, yPos, boxWidth, boxHeight, 4);
+          } else {
+            ctx.rect(xBox, yPos, boxWidth, boxHeight); 
+          }
+          ctx.fillStyle = '#1e293b'; // Bleu sombre pour bien ressortir (thème dark mode)
+          ctx.fill();
+
+          // Dessin du texte de la note
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'top';
+          lines.forEach((line, index) => {
+            ctx.fillText(line, xBox + boxWidth / 2, yPos + paddingY + (index * lineHeight));
+          });
+
+          ctx.restore();
+        });
+      }
+    };
+
+    // Rendu du graphique
+    const renderChart = () => {
+      Chart.defaults.font.family = "'Avenir', 'Avenir Next', system-ui, -apple-system, sans-serif";
+      
+      const { labels, datasets, annotationsData } = parseCSV(rawCSV);
+      const ctx = document.getElementById("chart").getContext("2d");
+
+      new Chart(ctx, {
+        type: 'line',
+        data: { labels, datasets, annotationsData }, // Passage des données d'annotations
+        plugins: [customAnnotationsPlugin], // Activation du plugin d'annotation
+        options: {
+          responsive: true,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: {
+              position: "bottom",
+              labels: { 
+                color: "#1e293b", 
+                font: { size: 12, weight: "500" },
+                usePointStyle: true, 
+                boxWidth: 8
+              }
+            },
+            tooltip: {
+              backgroundColor:"#1e293b", borderColor:"#1e293b", borderWidth:1,
+              titleColor:"#ffffff", bodyColor:"#e2e8f0",
+              titleFont:{ weight:'700' }, bodyFont:{ weight:'500' },
+              padding:10, cornerRadius:8,
+              itemSort: (a, b) => b.parsed.y - a.parsed.y, // Tri décroissant dans l'infobulle
+              callbacks: {
+                label: (ctx) => {
+                  const val = ctx.parsed.y !== null ? ctx.parsed.y.toFixed(3) : '-';
+                  return `${ctx.dataset.label} : ${val} € / MWh`;
+                }
+              }
+            }
+          },
+          scales: {
+            y: {
+              ticks: { color:"#64748b", callback: v => `${Number(v).toFixed(0)} €` },
+              grid: { color:"rgba(0,0,0,0.04)" },
+              border: { display:false }
+            },
+            x: {
+              offset: true,
+              ticks: { color:"#64748b", maxRotation:45, autoSkip:true, maxTicksLimit:15 },
+              grid: { display:false },
+              border: { display:false }
+            }
+          }
+        }
+      });
+
+      // Recalcul hauteur pour iframe
+      setTimeout(() => {
+        const h = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+        if (window.parent) window.parent.postMessage({ type: 'resize-iframe', height: h + 20 }, '*');
+      }, 400);
+    };
+
+    // Lancement immédiat
+    renderChart();
+  </script>
+</body>
+</html>
