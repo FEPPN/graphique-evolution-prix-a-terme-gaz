@@ -180,7 +180,7 @@
       return { labels, datasets, annotationsData };
     };
 
-    // Plugin personnalisé pour dessiner les annotations (lignes verticales + texte)
+    // Plugin personnalisé pour dessiner les annotations (bulles pointant vers les courbes)
     const customAnnotationsPlugin = {
       id: 'customAnnotations',
       afterDraw: (chart) => {
@@ -190,24 +190,32 @@
         const { ctx, scales: { x, y } } = chart;
         
         annotations.forEach((ann, i) => {
-          const xPos = x.getPixelForTick(ann.index);
+          // CORRECTION : On utilise getPixelForValue pour se caler sur l'index absolu de la donnée.
+          // Cela empêche le décalage causé par les dates intermédiaires masquées sur l'axe X.
+          const xPos = x.getPixelForValue(ann.index);
           if (isNaN(xPos) || xPos === undefined) return;
+
+          // 1. Trouver le point le plus haut parmi toutes les courbes pour cette date spécifique
+          let maxDataVal = -Infinity;
+          chart.data.datasets.forEach((ds, dsIndex) => {
+            if (!chart.isDatasetVisible(dsIndex)) return; // Ignore les courbes masquées
+            const val = ds.data[ann.index];
+            if (val !== null && val > maxDataVal) {
+              maxDataVal = val;
+            }
+          });
+          
+          if (maxDataVal === -Infinity) return; // Sécurité si aucune donnée
+
+          // 2. Récupérer la coordonnée Y exacte de ce sommet sur le graphique
+          const pointY = y.getPixelForValue(maxDataVal);
 
           ctx.save();
           
-          // Dessin de la ligne verticale en pointillés
-          ctx.beginPath();
-          ctx.moveTo(xPos, y.top);
-          ctx.lineTo(xPos, y.bottom);
-          ctx.lineWidth = 1.5;
-          ctx.strokeStyle = '#94a3b8'; // Gris discret et élégant
-          ctx.setLineDash([4, 4]);
-          ctx.stroke();
-
           // Paramètres de la boîte de texte
-          ctx.font = '600 11px Avenir, system-ui, sans-serif';
+          ctx.font = '500 11px Avenir, system-ui, sans-serif';
           
-          // Gestion du texte sur plusieurs lignes pour les notes longues
+          // Gestion du texte sur plusieurs lignes
           const maxWidth = 140;
           const words = ann.text.split(' ');
           const lines = [];
@@ -237,31 +245,57 @@
           const boxWidth = maxLineWidth + paddingX * 2;
           const boxHeight = (lines.length * lineHeight) + paddingY * 2 - 2; 
           
-          // Alterne la hauteur (10px puis 70px) pour éviter les superpositions si les événements sont proches
-          const yAdjust = (i % 2 === 0) ? 10 : 70; 
-          const yPos = y.top + yAdjust;
+          // 3. Positionnement dynamique de la boîte juste au-dessus de la courbe
+          let yBox = pointY - boxHeight - 20; 
+          let isAbove = true;
           
-          // Garde la boîte dans les limites du graphique pour ne pas la couper
+          // Si la bulle risque de sortir par le haut de l'écran, on la place en dessous
+          if (yBox < y.top + 5) {
+            yBox = pointY + 20;
+            isAbove = false;
+          }
+          
+          // Empêcher la bulle de sortir par les côtés gauche/droite
           let xBox = xPos - boxWidth / 2;
-          if (xBox < x.left) xBox = x.left;
-          if (xBox + boxWidth > x.right) xBox = x.right - boxWidth;
+          if (xBox < x.left + 5) xBox = x.left + 5;
+          if (xBox + boxWidth > x.right - 5) xBox = x.right - boxWidth - 5;
 
-          // Dessin du fond de la note
+          // 4. Dessin du petit trait reliant la bulle à la courbe
+          ctx.beginPath();
+          ctx.moveTo(xPos, isAbove ? yBox + boxHeight : yBox);
+          ctx.lineTo(xPos, isAbove ? pointY - 5 : pointY + 5);
+          ctx.lineWidth = 1;
+          ctx.strokeStyle = '#94a3b8'; // Gris discret
+          ctx.stroke();
+
+          // 5. Dessin du point d'ancrage sur la courbe
+          ctx.beginPath();
+          ctx.arc(xPos, pointY, 3, 0, 2 * Math.PI);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = '#94a3b8';
+          ctx.stroke();
+
+          // 6. Dessin du fond de la bulle
           ctx.beginPath();
           if (ctx.roundRect) {
-            ctx.roundRect(xBox, yPos, boxWidth, boxHeight, 4);
+            ctx.roundRect(xBox, yBox, boxWidth, boxHeight, 3);
           } else {
-            ctx.rect(xBox, yPos, boxWidth, boxHeight); 
+            ctx.rect(xBox, yBox, boxWidth, boxHeight); 
           }
-          ctx.fillStyle = '#1e293b'; // Bleu sombre pour bien ressortir (thème dark mode)
-          ctx.fill();
-
-          // Dessin du texte de la note
           ctx.fillStyle = '#ffffff';
+          ctx.fill();
+          ctx.lineWidth = 1;
+          ctx.strokeStyle = '#cbd5e1';
+          ctx.stroke();
+
+          // 7. Dessin du texte dans la bulle
+          ctx.fillStyle = '#475569'; 
           ctx.textAlign = 'center';
           ctx.textBaseline = 'top';
           lines.forEach((line, index) => {
-            ctx.fillText(line, xBox + boxWidth / 2, yPos + paddingY + (index * lineHeight));
+            ctx.fillText(line, xBox + boxWidth / 2, yBox + paddingY + (index * lineHeight));
           });
 
           ctx.restore();
